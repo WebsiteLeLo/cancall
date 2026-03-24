@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "CanCall - Voice & Video Calling"
+version = "1.0.0"
+id = "artifacts/cancall"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21876
+
+[services.development]
+run = "pnpm --filter @workspace/cancall run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/cancall", "run", "build" ]
+publicDir = "artifacts/cancall/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21876"
+BASE_PATH = "/"
