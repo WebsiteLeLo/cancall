@@ -62,6 +62,7 @@ export default function Room({ params }: { params: { id: string } }) {
   const [duration, setDuration] = useState(0);
   const [showShare, setShowShare] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const endedRef = useRef(false);
   const isNew = params.id === "new";
 
   const startDurationTimer = useCallback(() => {
@@ -76,10 +77,23 @@ export default function Room({ params }: { params: { id: string } }) {
     return `${m}:${s}`;
   };
 
+  const triggerEnd = useCallback(() => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    if (timerRef.current) clearInterval(timerRef.current);
+    setCallState("ended");
+    setTimeout(() => setLocation("/"), 1500);
+  }, [setLocation]);
+
   useEffect(() => {
     let mounted = true;
     const call = new WebRTCCall(mode);
     callRef.current = call;
+
+    call.onPeerHangUp = () => {
+      if (!mounted) return;
+      triggerEnd();
+    };
 
     call.pc.onconnectionstatechange = () => {
       if (!mounted) return;
@@ -89,7 +103,7 @@ export default function Room({ params }: { params: { id: string } }) {
         setShowShare(false);
         startDurationTimer();
       } else if (state === "disconnected" || state === "failed") {
-        setCallState("ended");
+        triggerEnd();
       }
     };
 
@@ -146,10 +160,8 @@ export default function Room({ params }: { params: { id: string } }) {
   };
 
   const handleHangUp = async () => {
-    if (timerRef.current) clearInterval(timerRef.current);
     await callRef.current?.hangUp();
-    setCallState("ended");
-    setTimeout(() => setLocation("/"), 1500);
+    triggerEnd();
   };
 
   const handleCopyLink = () => {

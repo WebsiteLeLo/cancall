@@ -25,9 +25,11 @@ export class WebRTCCall {
   remoteStream: MediaStream;
   roomId: string | null = null;
   mode: CallMode;
+  onPeerHangUp: (() => void) | null = null;
   private unsubs: Unsubscribe[] = [];
   private remoteDescSet = false;
   private pendingCandidates: RTCIceCandidateInit[] = [];
+  private hungUp = false;
 
   constructor(mode: CallMode = "video") {
     this.mode = mode;
@@ -98,6 +100,10 @@ export class WebRTCCall {
     await setDoc(roomRef, { offer });
 
     const unsub = onSnapshot(roomRef, async (snapshot) => {
+      if (!snapshot.exists() && !this.hungUp) {
+        this.onPeerHangUp?.();
+        return;
+      }
       const data = snapshot.data();
       if (!this.remoteDescSet && data?.answer) {
         this.remoteDescSet = true;
@@ -162,6 +168,13 @@ export class WebRTCCall {
       });
     });
     this.unsubs.push(unsub);
+
+    const unsub2 = onSnapshot(roomRef, (snapshot) => {
+      if (!snapshot.exists() && !this.hungUp) {
+        this.onPeerHangUp?.();
+      }
+    });
+    this.unsubs.push(unsub2);
   }
 
   toggleMute(): boolean {
@@ -185,6 +198,7 @@ export class WebRTCCall {
   }
 
   async hangUp() {
+    this.hungUp = true;
     this.unsubs.forEach((unsub) => unsub());
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.pc.close();
