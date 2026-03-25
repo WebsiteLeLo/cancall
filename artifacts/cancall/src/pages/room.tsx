@@ -99,11 +99,14 @@ export default function Room({ params }: { params: { id: string } }) {
       if (!mounted) return;
       const state = call.pc.connectionState;
       if (state === "connected") {
+        call.markConnected();
         setCallState("connected");
         setShowShare(false);
         startDurationTimer();
-      } else if (state === "disconnected" || state === "failed") {
-        triggerEnd();
+      } else if (state === "disconnected") {
+        call.handleDisconnect();
+      } else if (state === "failed") {
+        call.handleFailed();
       }
     };
 

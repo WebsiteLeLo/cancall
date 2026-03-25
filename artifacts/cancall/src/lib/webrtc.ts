@@ -12,7 +12,14 @@ import { db } from "./firebase";
 
 const servers: RTCConfiguration = {
   iceServers: [
-    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+    {
+      urls: [
+        "stun:stun1.l.google.com:19302",
+        "stun:stun2.l.google.com:19302",
+        "stun:stun3.l.google.com:19302",
+        "stun:stun4.l.google.com:19302",
+      ],
+    },
   ],
   iceCandidatePoolSize: 10,
 };
@@ -25,11 +32,15 @@ export class WebRTCCall {
   remoteStream: MediaStream;
   roomId: string | null = null;
   mode: CallMode;
+
   onPeerHangUp: (() => void) | null = null;
+
   private unsubs: Unsubscribe[] = [];
   private remoteDescSet = false;
   private pendingCandidates: RTCIceCandidateInit[] = [];
   private hungUp = false;
+  private hasConnected = false;
+  private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(mode: CallMode = "video") {
     this.mode = mode;
@@ -63,6 +74,32 @@ export class WebRTCCall {
     }
   }
 
+  private firePeerHangUp() {
+    if (!this.hungUp) {
+      this.onPeerHangUp?.();
+    }
+  }
+
+  markConnected() {
+    this.hasConnected = true;
+    if (this.disconnectTimer) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
+    }
+  }
+
+  handleDisconnect() {
+    if (!this.hasConnected) return;
+    if (this.disconnectTimer) return;
+    this.disconnectTimer = setTimeout(() => {
+      this.firePeerHangUp();
+    }, 15000);
+  }
+
+  handleFailed() {
+    this.firePeerHangUp();
+  }
+
   async getLocalMedia() {
     const constraints =
       this.mode === "video"
@@ -91,17 +128,19 @@ export class WebRTCCall {
     const offerDescription = await this.pc.createOffer();
     await this.pc.setLocalDescription(offerDescription);
 
-    const offer = {
-      sdp: offerDescription.sdp,
-      type: offerDescription.type,
-      mode: this.mode,
-    };
-
-    await setDoc(roomRef, { offer });
+    await setDoc(roomRef, {
+      offer: {
+        sdp: offerDescription.sdp,
+        type: offerDescription.type,
+        mode: this.mode,
+      },
+    });
 
     const unsub = onSnapshot(roomRef, async (snapshot) => {
-      if (!snapshot.exists() && !this.hungUp) {
-        this.onPeerHangUp?.();
+      if (!snapshot.exists()) {
+        if (this.hasConnected && !this.hungUp) {
+          this.firePeerHangUp();
+        }
         return;
       }
       const data = snapshot.data();
@@ -152,12 +191,13 @@ export class WebRTCCall {
     const answerDescription = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answerDescription);
 
-    const answer = {
-      type: answerDescription.type,
-      sdp: answerDescription.sdp,
-    };
-
-    await setDoc(roomRef, { ...roomData, answer });
+    await setDoc(roomRef, {
+      ...roomData,
+      answer: {
+        type: answerDescription.type,
+        sdp: answerDescription.sdp,
+      },
+    });
     await this.flushPendingCandidates();
 
     const unsub = onSnapshot(offerCandidatesRef, (snapshot) => {
@@ -170,8 +210,8 @@ export class WebRTCCall {
     this.unsubs.push(unsub);
 
     const unsub2 = onSnapshot(roomRef, (snapshot) => {
-      if (!snapshot.exists() && !this.hungUp) {
-        this.onPeerHangUp?.();
+      if (!snapshot.exists() && this.hasConnected && !this.hungUp) {
+        this.firePeerHangUp();
       }
     });
     this.unsubs.push(unsub2);
@@ -199,6 +239,7 @@ export class WebRTCCall {
 
   async hangUp() {
     this.hungUp = true;
+    if (this.disconnectTimer) clearTimeout(this.disconnectTimer);
     this.unsubs.forEach((unsub) => unsub());
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.pc.close();
